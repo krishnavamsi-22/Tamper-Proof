@@ -94,10 +94,39 @@ router.post('/:id/approve', auth, requireRole('teacher'), async (req, res) => {
       return res.status(403).json({ error: 'You can only approve courses in your subject' });
     }
 
-    // Auto-generate marks based on completion
-    const totalLessons = enrollment.courseId.lessons.length;
-    const completedCount = enrollment.completedLessons.length;
-    const marks = Math.round((completedCount / totalLessons) * 100);
+    // Check if course has assignments
+    const Assignment = require('../models/Assignment');
+    const Submission = require('../models/Submission');
+    
+    const assignments = await Assignment.find({ courseId: enrollment.courseId._id });
+    
+    let marks = 100; // Default if no assignments
+    
+    if (assignments.length > 0) {
+      // Calculate marks from assignments
+      const assignmentMarks = [];
+      
+      for (const assignment of assignments) {
+        // Get all submissions for this assignment by this student
+        const submissions = await Submission.find({
+          assignmentId: assignment._id,
+          studentId: enrollment.studentId,
+          status: { $in: ['approved', 'rejected'] } // Only evaluated submissions
+        }).sort({ marksAwarded: -1 }); // Sort by marks descending
+        
+        if (submissions.length === 0) {
+          return res.status(400).json({ error: `Assignment "${assignment.title}" not submitted or evaluated` });
+        }
+        
+        // Get highest marks from all attempts
+        const highestMarks = submissions[0].marksAwarded || 0;
+        assignmentMarks.push(highestMarks);
+      }
+      
+      // Calculate average
+      const sum = assignmentMarks.reduce((a, b) => a + b, 0);
+      marks = Math.round(sum / assignmentMarks.length);
+    }
 
     // Generate hash
     const marksHash = generateMarksHash(
@@ -149,6 +178,9 @@ router.post('/:id/store-marks-blockchain', auth, requireRole('teacher'), async (
 // Get all enrollments (teacher/admin) - filtered by subject for teachers
 router.get('/all', auth, requireRole('teacher', 'admin'), async (req, res) => {
   try {
+    const Assignment = require('../models/Assignment');
+    const Submission = require('../models/Submission');
+    
     let enrollments = await Enrollment.find()
       .populate('studentId', 'name email')
       .populate('courseId', 'title courseId lessons subject');
@@ -160,10 +192,60 @@ router.get('/all', auth, requireRole('teacher', 'admin'), async (req, res) => {
       );
     }
     
-    console.log('Total enrollments:', enrollments.length);
-    console.log('Completed enrollments:', enrollments.filter(e => e.status === 'completed').length);
+    // Add canApprove flag for each enrollment
+    const enrichedEnrollments = await Promise.all(enrollments.map(async (enrollment) => {
+      const enrollmentObj = enrollment.toObject();
+      enrollmentObj.canApprove = false;
+      
+      // Only check if status is completed
+      if (enrollment.status === 'completed') {
+        const assignments = await Assignment.find({ courseId: enrollment.courseId._id });
+        
+        if (assignments.length === 0) {
+          // No assignments, can approve
+          enrollmentObj.canApprove = true;
+        } else {
+          // Check all assignments
+          let allReady = true;
+          
+          for (const assignment of assignments) {
+            const submissions = await Submission.find({
+              assignmentId: assignment._id,
+              studentId: enrollment.studentId._id
+            }).sort({ attemptNumber: -1 });
+            
+            if (submissions.length === 0) {
+              // No submission yet
+              allReady = false;
+              break;
+            }
+            
+            const latestSubmission = submissions[0];
+            
+            // Check if evaluated
+            if (latestSubmission.status === 'pending') {
+              allReady = false;
+              break;
+            }
+            
+            // Check if failed and has attempts left
+            if (latestSubmission.status === 'rejected' || 
+                (latestSubmission.marksAwarded < assignment.passingMarks)) {
+              if (latestSubmission.attemptNumber < 3) {
+                allReady = false;
+                break;
+              }
+            }
+          }
+          
+          enrollmentObj.canApprove = allReady;
+        }
+      }
+      
+      return enrollmentObj;
+    }));
     
-    res.json(enrollments);
+    res.json(enrichedEnrollments);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -2,7 +2,7 @@ const express = require('express');
 const Certificate = require('../models/Certificate');
 const Enrollment = require('../models/Enrollment');
 const { auth, requireRole } = require('../middleware/auth');
-const { generateCertificateHash } = require('../utils/hash');
+const { generateCertificatePDF } = require('../utils/pdfGenerator');
 
 const router = express.Router();
 
@@ -50,13 +50,15 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
       issuedAt: new Date().toISOString()
     });
 
-    const certificateHash = generateCertificateHash(certificateData);
+    // Generate PDF and calculate hash
+    const { pdfBuffer, hash } = await generateCertificatePDF(certificateData);
 
     const certificate = new Certificate({
       studentId: enrollment.studentId._id,
       courseId: enrollment.courseId._id,
       certificateData,
-      certificateHash,
+      certificateHash: hash,
+      pdfData: pdfBuffer.toString('base64'), // Store PDF as base64
       issuedBy: walletAddress
     });
 
@@ -66,7 +68,7 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
     enrollment.status = 'verified';
     await enrollment.save();
     
-    res.status(201).json({ certificate, certificateHash });
+    res.status(201).json({ certificate, certificateHash: hash });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -104,6 +106,31 @@ router.get('/:id', async (req, res) => {
     
     if (!certificate) return res.status(404).json({ error: 'Certificate not found' });
     res.json(certificate);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Download certificate PDF
+router.get('/download/:id', auth, async (req, res) => {
+  try {
+    const certificate = await Certificate.findById(req.params.id)
+      .populate('studentId', 'name')
+      .populate('courseId', 'courseId');
+    
+    if (!certificate) return res.status(404).json({ error: 'Certificate not found' });
+    
+    // Check if user is the student or admin
+    if (req.user.role !== 'admin' && certificate.studentId._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const pdfBuffer = Buffer.from(certificate.pdfData, 'base64');
+    const data = JSON.parse(certificate.certificateData);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=certificate_${data.courseId}_${Date.now()}.pdf`);
+    res.send(pdfBuffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

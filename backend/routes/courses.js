@@ -1,5 +1,6 @@
 const express = require('express');
 const Course = require('../models/Course');
+const Assignment = require('../models/Assignment');
 const { auth, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
@@ -25,10 +26,20 @@ router.post('/', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// Get all courses
-router.get('/', async (req, res) => {
+// Get all courses (filtered by role)
+router.get('/', auth, async (req, res) => {
   try {
-    const courses = await Course.find().populate('createdBy', 'name email');
+    let query = {};
+    
+    // Teacher: only courses matching their subject
+    if (req.user.role === 'teacher') {
+      query = { subject: req.user.subject };
+    }
+    
+    // Student: all courses (no filter)
+    // Students can enroll in any course
+    
+    const courses = await Course.find(query).populate('createdBy', 'name email');
     res.json(courses);
   } catch (error) {
     res.status(500).json({ error: error.message });

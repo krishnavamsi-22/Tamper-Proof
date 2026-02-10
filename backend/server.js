@@ -8,12 +8,14 @@ const courseRoutes = require('./routes/courses');
 const enrollmentRoutes = require('./routes/enrollments');
 const certificateRoutes = require('./routes/certificates');
 const adminRoutes = require('./routes/admin');
+const assignmentRoutes = require('./routes/assignments');
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static('uploads')); // Serve uploaded files
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -21,6 +23,7 @@ app.use('/api/courses', courseRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/assignments', assignmentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

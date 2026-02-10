@@ -35,6 +35,15 @@ export const enrollmentAPI = {
   getAll: () => api.get('/enrollments/all')
 };
 
+export const assignmentAPI = {
+  create: (data) => api.post('/assignments', data),
+  getByCourse: (courseId) => api.get(`/assignments/course/${courseId}`),
+  submit: (id, data) => api.post(`/assignments/${id}/submit`, data),
+  getPending: () => api.get('/assignments/submissions/pending'),
+  evaluate: (id, data) => api.post(`/assignments/submissions/${id}/evaluate`, data),
+  getMySubmissions: () => api.get('/assignments/my-submissions')
+};
+
 export const certificateAPI = {
   generate: (enrollmentId, walletAddress) => api.post('/certificates', { enrollmentId, walletAddress }),
   getMy: () => api.get('/certificates/my'),
